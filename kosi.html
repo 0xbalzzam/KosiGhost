@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Kosi Ghost</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1020;overflow:hidden;font-family:system-ui,Segoe UI,sans-serif;touch-action:none;}
+  canvas{display:block;width:100%;height:100%;}
+  #ui{position:fixed;inset:0;pointer-events:none;color:#e8f0ff;}
+  #hud{position:absolute;top:12px;left:16px;right:16px;display:flex;justify-content:space-between;font-weight:700;text-shadow:0 2px 8px #000;font-size:18px;}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(6,8,18,.55);pointer-events:auto;}
+  #overlay.hide{display:none;}
+  .card{background:linear-gradient(180deg,#1a2344,#12182e);border:1px solid #3d4d86;border-radius:18px;padding:28px 32px;text-align:center;max-width:440px;box-shadow:0 20px 60px #000a;}
+  h1{margin:0 0 8px;font-size:32px;letter-spacing:1px;}
+  p{margin:6px 0;opacity:.9;line-height:1.45;}
+  button{margin:8px 6px 0;padding:12px 18px;border:0;border-radius:12px;font-weight:700;cursor:pointer;background:#7aa2ff;color:#0b1020;}
+  button.sec{background:#2a3358;color:#e8f0ff;}
+  .hide{display:none;}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div id="hud"><span id="dist">0 m</span><span id="coins">🪙 0</span></div>
+  <div id="overlay">
+    <div class="card">
+      <h1 id="title">Kosi Ghost</h1>
+      <p id="msg">Jump 1, 2, or 3 tombstones in a row. After 500 m, duck under smaller evil ghosts.<br>Space / tap to jump. Down / swipe down to duck.<br>Duck in the air to fall faster. Gaps shrink a little as you speed up.</p>
+      <p id="result" class="hide"></p>
+      <button id="start">Play</button>
+      <button id="share" class="sec hide">Share on X</button>
+      <button id="shot" class="sec hide">Screenshot</button>
+    </div>
+  </div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const hudD = document.getElementById('dist');
+const hudC = document.getElementById('coins');
+const overlay = document.getElementById('overlay');
+const title = document.getElementById('title');
+const msg = document.getElementById('msg');
+const result = document.getElementById('result');
+const startBtn = document.getElementById('start');
+const shareBtn = document.getElementById('share');
+const shotBtn = document.getElementById('shot');
+
+let dpr, ground;
+function resize(){
+  dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = innerWidth * dpr;
+  canvas.height = innerHeight * dpr;
+  canvas.style.width = innerWidth + 'px';
+  canvas.style.height = innerHeight + 'px';
+  ground = innerHeight * 0.78;
+}
+addEventListener('resize', resize); resize();
+
+const state = {run:false, dist:0, coins:0, speed:6.2, t:0, shake:0, wait:0, fastFall:false};
+const kosi = {x:0, y:0, vy:0, w:54, h:64, duck:false};
+let obs = [], coinsA = [], parts = [], stars = [];
+
+function reset(){
+  state.dist = 0; state.coins = 0; state.speed = 6.2; state.t = 0; state.shake = 0;
+  state.wait = 280; state.fastFall = false;
+  kosi.x = innerWidth * 0.18;
+  kosi.y = ground - kosi.h;
+  kosi.vy = 0; kosi.duck = false;
+  obs = []; coinsA = []; parts = [];
+  stars = Array.from({length:70}, () => ({x:Math.random()*innerWidth, y:Math.random()*ground*0.7, r:Math.random()*1.6+0.3}));
+}
+function onGround(){ return kosi.y >= ground - kosi.h - 0.5; }
+function jump(){
+  if (!state.run || !onGround()) return;
+  kosi.duck = false;
+  state.fastFall = false;
+  kosi.vy = -13.4;
+}
+function setDuck(on){
+  if (!state.run) return;
+  if (on && !onGround()) { state.fastFall = true; return; }
+  state.fastFall = false;
+  kosi.duck = on && onGround();
+}
+
+addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); if (!e.repeat) jump(); }
+  if (e.code === 'ArrowDown') { e.preventDefault(); setDuck(true); }
+});
+addEventListener('keyup', e => {
+  if (e.code === 'ArrowDown') { kosi.duck = false; state.fastFall = false; }
+});
+let touchY = 0;
+canvas.addEventListener('touchstart', e => { touchY = e.touches[0].clientY; jump(); }, {passive:true});
+canvas.addEventListener('touchmove', e => { if (e.touches[0].clientY - touchY > 24) setDuck(true); }, {passive:true});
+canvas.addEventListener('touchend', () => { kosi.duck = false; state.fastFall = false; });
+
+function hit(a,b){ return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y; }
+function kosiBox(){
+  const ducking = kosi.duck && onGround();
+  const h = ducking ? 34 : kosi.h;
+  const y = ducking ? ground - h : kosi.y;
+  return {x:kosi.x+10, y:y+8, w:kosi.w-20, h:h-12};
+}
+function boom(x,y,col){
+  for (let i=0;i<8;i++) parts.push({x,y,vx:(Math.random()-0.5)*4, vy:(Math.random()-1.2)*3, life:26, col});
+}
+function gapNeed(){
+  return Math.max(240, 380 - state.dist * 0.08);
+}
+function spawn(){
+  state.wait -= state.speed;
+  if (state.wait > 0) return;
+  const last = obs[obs.length-1];
+  if (last && innerWidth + 20 - last.x < 36) { state.wait = 24; return; }
+  const allowGhosts = state.dist >= 500;
+  if (allowGhosts && Math.random() < 0.3){
+    obs.push({kind:'ghost', x: innerWidth + 24, w:40, h:32});
+    coinsA.push({x: innerWidth - 90, y: ground - 46, r:12, spin:0});
+    state.wait = gapNeed();
+    return;
+  }
+  const roll = Math.random();
+  const count = roll < 0.34 ? 1 : roll < 0.7 ? 2 : 3;
+  const step = 46;
+  const base = innerWidth + 24;
+  for (let i=0;i<count;i++) obs.push({kind:'tomb', x: base + i*step, w:32, h:44 + (i%2)*10});
+  coinsA.push({x: base - 96, y: ground - 70, r:12, spin:Math.random()*6});
+  if (Math.random() < 0.5) coinsA.push({x: base - 140, y: ground - 40, r:11, spin:1});
+  state.wait = gapNeed() + count * 20;
+}
+
+function drawKosi(){
+  const ducking = kosi.duck && onGround();
+  const bob = onGround() ? Math.sin(state.t*0.18)*3 : 0;
+  const h = ducking ? 36 : 64;
+  const y = (ducking ? ground - h : kosi.y) + bob;
+  ctx.save();
+  ctx.translate(kosi.x + 27, y + h*0.55);
+  ctx.scale(1, ducking ? 0.58 : 1);
+  const g = ctx.createLinearGradient(-20,-30,20,30);
+  g.addColorStop(0,'#f4f7ff'); g.addColorStop(1,'#b9c6ee');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(-22,-18); ctx.quadraticCurveTo(-26,-40,0,-42); ctx.quadraticCurveTo(26,-40,22,-18);
+  ctx.quadraticCurveTo(28,8,18,22); ctx.quadraticCurveTo(10,14,4,24); ctx.quadraticCurveTo(-2,12,-10,24);
+  ctx.quadraticCurveTo(-20,12,-22,-18); ctx.fill();
+  ctx.fillStyle = '#1b2140';
+  ctx.beginPath(); ctx.ellipse(-8,-6,4.2,5.2,0,0,7); ctx.ellipse(8,-6,4.2,5.2,0,0,7); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(-6.5,-7.5,1.4,0,7); ctx.arc(9.5,-7.5,1.4,0,7); ctx.fill();
+  ctx.restore();
+}
+function drawTomb(o){
+  const y = ground - o.h;
+  ctx.fillStyle = '#6d7aa8';
+  ctx.fillRect(o.x, y+14, o.w, o.h-14);
+  ctx.beginPath(); ctx.arc(o.x+o.w/2, y+14, o.w/2, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = '#c9d4ff';
+  ctx.fillRect(o.x+o.w/2-2, y+20, 4, 14);
+}
+function drawEvil(o){
+  ctx.save();
+  ctx.translate(o.x+18, ground - 62);
+  ctx.scale(0.62, 0.62);
+  ctx.fillStyle = '#6b4d86';
+  ctx.beginPath();
+  ctx.moveTo(-16,-10); ctx.quadraticCurveTo(-18,-28,0,-30); ctx.quadraticCurveTo(18,-28,16,-10);
+  ctx.quadraticCurveTo(18,10,10,18); ctx.quadraticCurveTo(2,8,-4,18); ctx.quadraticCurveTo(-14,8,-16,-10);
+  ctx.fill();
+  ctx.fillStyle = '#ff5d7a';
+  ctx.beginPath(); ctx.arc(-6,-4,3,0,7); ctx.arc(6,-4,3,0,7); ctx.fill();
+  ctx.restore();
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  const iw = innerWidth, ih = innerHeight;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  if (state.shake>0){ ctx.translate((Math.random()-0.5)*state.shake,(Math.random()-0.5)*state.shake); state.shake*=0.85; }
+  const sky = ctx.createLinearGradient(0,0,0,ih);
+  sky.addColorStop(0,'#141a33'); sky.addColorStop(1,'#2a2148');
+  ctx.fillStyle = sky; ctx.fillRect(0,0,iw,ih);
+  stars.forEach(s => { s.x -= state.run ? state.speed*0.15 : 0.2; if (s.x<0) s.x = iw; ctx.fillStyle='rgba(255,255,255,.75)'; ctx.fillRect(s.x,s.y,s.r,s.r); });
+  ctx.fillStyle = '#1c243f'; ctx.fillRect(0, ground, iw, ih-ground);
+  ctx.fillStyle = '#2e3a66';
+  for (let i=0;i<iw;i+=28) ctx.fillRect((i - (state.dist*8)%28), ground, 14, 4);
+
+  if (state.run){
+    state.t++;
+    state.dist += state.speed * 0.045;
+    state.speed = Math.min(17, 6.2 + state.dist / 80);
+    const grav = state.fastFall ? 1.35 : 0.52;
+    kosi.vy += grav;
+    if (state.fastFall && kosi.vy < 0) kosi.vy += 0.85;
+    kosi.y += kosi.vy;
+    if (kosi.y >= ground - kosi.h){
+      kosi.y = ground - kosi.h;
+      kosi.vy = 0;
+      state.fastFall = false;
+    }
+    spawn();
+    const box = kosiBox();
+    for (const o of obs){
+      o.x -= state.speed;
+      if (o.kind==='tomb'){
+        if (hit(box, {x:o.x+5, y:ground-o.h+8, w:o.w-10, h:o.h-10})) return gameOver();
+      } else if (!(kosi.duck && onGround()) && hit(box, {x:o.x+6, y:ground-74, w:28, h:28})) {
+        return gameOver();
+      }
+    }
+    obs = obs.filter(o => o.x > -90);
+    coinsA.forEach(c => {
+      c.x -= state.speed; c.spin += 0.15;
+      const cy = kosi.y + 30;
+      if (Math.hypot(c.x-(kosi.x+27), c.y-cy) < 42){ c.dead = true; state.coins++; boom(c.x,c.y,'#ffd76a'); }
+    });
+    coinsA = coinsA.filter(c => !c.dead && c.x > -20);
+    hudD.textContent = Math.floor(state.dist) + ' m';
+    hudC.textContent = '🪙 ' + state.coins;
+  }
+  obs.forEach(o => o.kind==='tomb' ? drawTomb(o) : drawEvil(o));
+  coinsA.forEach(c => {
+    ctx.save(); ctx.translate(c.x,c.y); ctx.scale(Math.abs(Math.cos(c.spin)),1);
+    ctx.fillStyle = '#ffd76a'; ctx.beginPath(); ctx.arc(0,0,c.r,0,7); ctx.fill();
+    ctx.fillStyle = '#8a6420'; ctx.font = '700 12px system-ui'; ctx.fillText('✦', -5, 4); ctx.restore();
+  });
+  parts.forEach(p => { p.x+=p.vx; p.y+=p.vy; p.life--; ctx.globalAlpha=p.life/26; ctx.fillStyle=p.col; ctx.fillRect(p.x,p.y,3,3); ctx.globalAlpha=1; });
+  parts = parts.filter(p => p.life>0);
+  drawKosi();
+}
+loop();
+
+function gameOver(){
+  if (!state.run) return;
+  state.run = false; state.shake = 10; kosi.duck = false; state.fastFall = false;
+  title.textContent = 'Run over';
+  msg.classList.add('hide');
+  result.classList.remove('hide');
+  result.innerHTML = `Distance: <b>${Math.floor(state.dist)} m</b><br>Coins: <b>${state.coins}</b>`;
+  startBtn.textContent = 'Again';
+  shareBtn.classList.remove('hide');
+  shotBtn.classList.remove('hide');
+  overlay.classList.remove('hide');
+}
+startBtn.onclick = () => {
+  reset();
+  state.run = true;
+  overlay.classList.add('hide');
+  result.classList.add('hide');
+  msg.classList.remove('hide');
+  shareBtn.classList.add('hide');
+  shotBtn.classList.add('hide');
+  title.textContent = 'Kosi Ghost';
+  startBtn.textContent = 'Play';
+};
+shotBtn.onclick = () => {
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = `kosi-${Math.floor(state.dist)}m.png`;
+  a.click();
+};
+shareBtn.onclick = async () => {
+  const text = `Kosi ran ${Math.floor(state.dist)} m and collected ${state.coins} coins in Kosi Ghost! Beat this.`;
+  const url = location.href;
+  const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+  try {
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    const file = new File([blob], 'kosi-score.png', {type:'image/png'});
+    if (navigator.canShare && navigator.canShare({files:[file]})) {
+      await navigator.share({text, url, files:[file]});
+      return;
+    }
+  } catch(e) {}
+  window.open(intent, '_blank', 'noopener');
+};
+reset();
+</script>
+</body>
+</html>
