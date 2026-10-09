@@ -6,7 +6,7 @@ A small endless runner in the Chrome Dino style. Kosi the ghost jumps rows of to
 
 Hosted build: replace this line with your GitHub Pages URL after the first deploy.
 
-Local: open `index.html` in a browser.
+Local: open `kosi.html` in a browser.
 
 ## Controls
 
