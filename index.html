@@ -263,14 +263,15 @@ shotBtn.onclick = () => {
   a.click();
 };
 shareBtn.onclick = async () => {
-  const text = `Kosi ran ${Math.floor(state.dist)} m and collected ${state.coins} coins in Kosi Ghost! Beat this.`;
-  const url = location.href;
-  const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+  const dist = Math.floor(state.dist);
+  const gameUrl = 'https://kosighost-v2.onrender.com';
+  const text = `I played Kosi Ghost by @0xbalzzam and ran ${dist} m (${state.coins} coins). How far can you go?\n${gameUrl}`;
+  const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
   try {
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
     const file = new File([blob], 'kosi-score.png', {type:'image/png'});
     if (navigator.canShare && navigator.canShare({files:[file]})) {
-      await navigator.share({text, url, files:[file]});
+      await navigator.share({text, files:[file]});
       return;
     }
   } catch(e) {}
