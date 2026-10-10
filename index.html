@@ -262,19 +262,11 @@ shotBtn.onclick = () => {
   a.download = `kosi-${Math.floor(state.dist)}m.png`;
   a.click();
 };
-shareBtn.onclick = async () => {
+shareBtn.onclick = () => {
   const dist = Math.floor(state.dist);
   const gameUrl = 'https://kosighost-v2.onrender.com';
   const text = `I played Kosi Ghost by @0xbalzzam and ran ${dist} m (${state.coins} coins). How far can you go?\n${gameUrl}`;
   const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
-  try {
-    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-    const file = new File([blob], 'kosi-score.png', {type:'image/png'});
-    if (navigator.canShare && navigator.canShare({files:[file]})) {
-      await navigator.share({text, files:[file]});
-      return;
-    }
-  } catch(e) {}
   window.open(intent, '_blank', 'noopener');
 };
 reset();
